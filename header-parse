@@ -1,0 +1,80 @@
+#!/usr/bin/python
+
+import re   ### Import regex module.
+
+Doc = raw_input("\nWhich file? ")  ### Prompts to enter the filename to parse.
+print('\n' + '-' * 120 + '\n')     ### Creates separating lines to organize the sections.
+
+
+c = open('.conn_ip', 'w+')   ### Create file ".conn_ip" to save connecting IP information for later spfquery in bash script.
+
+
+### Opens the Doc string, which was entered manually by the user. Creates ".email_" and '.domain' for later use by spfquery and dns lookup.
+
+with open(Doc,'r+') as f, open('.email_', 'w+') as d, open('.domain', 'w+') as m:
+
+
+  prev_line = ''   ### Empty string that acts like a switch. It is populated by "Received" when the currentl line being iterated through is
+                   ### a continuing line of a "Recieved" hop in the headers. When a non received line is encountered, the switch is turned off
+                   ### by emptying the string once again. This is used in the conditional statements below to check if a line is relevant.
+
+
+  for line in f:   ### Iterate through the lines in the headers.
+
+    ### Checks if line starts with "Return-Path", capture the email address on the line and assign it to var envelope_from.
+    if re.match('Return-Path:', line):
+      envelope_from = re.search('([A-Za-z0-9-\.]+@[A-Za-z0-9-\.]+)', line)
+      continue
+
+    ### Checks if line begins with "message-id", which then stores the line in var message_id to print in a later section.
+    elif re.match('Message-ID', line):
+      message_id = line
+      continue
+
+    ### Checks if line starts with "From", which then captures the email address in the line and the domain. It the email address and domain in vars
+    ### header_from (email address) and domain_ (for domain). It then writes these two values to files 'd' and 'm' (which were opened earlier).
+    elif re.match('From', line):
+      header_from = re.search('([A-Za-z0-9-\.]+@[A-Za-z0-9-\.]+)', line)
+      domain_ = re.search('@([A-Za-z0-9-\.]+)', line)
+      d.write(header_from.groups()[0])
+      m.write(domain_.groups()[0])
+      continue
+
+    ### Checks if line starts with "Date", and saves the line to var date_sent for later use.
+    elif re.match('Date', line):
+      date_sent = line
+      continue
+
+    ### Checks if the line starts with something other than "Received" or whitespace.
+    elif re.match('[^Received]', line) and re.match('[^\s]+', line):
+      if prev_line == 'Received':   ### If the prev_line string is set to 'Received', empty the string variable.
+        prev_line = ''
+        continue
+      else:
+        continue
+
+    ### If the string prev_line is already empty, then continue to the next line.
+    elif re.match('\s+', line):
+      if prev_line == '':
+        continue
+
+    ### If the line begins with 'Received', set the prev_line string to 'Received'.
+    elif re.match('Received', line):
+      prev_line = 'Received'
+      if re.match('Received-SPF', line):   ### If line begins with 'Received-SPF', capture the connecting IP and write to file c.
+        conn_ip = re.search('client-ip=(.*);', line)
+        c.write(conn_ip.groups()[0])
+
+    ### If nothing else matches in the specified conditionals, move on to the next line.
+    else:
+      continue
+    
+    print(line)   ### Print the line if none of the conditionals lead to 'continue'.
+
+
+print('-' * 120 + '\n')   ### Separator lines.
+
+
+### If date_sent is populated, print, else file being parsed is a sent header and there is not received date.
+try:
+  print(date_sent)
