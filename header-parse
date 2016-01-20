@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
 import re   ### Import regex module.
+import sys
 
-Doc = raw_input("\nWhich file? ")  ###    Prompts to enter the filename to parse.
+Doc = sys.argv[1]  ###    Sets argument to variable Doc.
 print('\n' + '-' * 120 + '\n')     ###    Creates separating lines to organize the sections.
 
 
