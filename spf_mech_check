@@ -1,0 +1,166 @@
+#!/usr/bin/python
+
+import re  ## Import regex module.
+import sys
+import dns ## Import py3dns module for DNS lookups.
+
+## Checks for argument passed, if none is found then ask for filename to be parsed.
+try:
+    doc = sys.argv[1]
+except:
+    doc = input("File? ")
+
+separator = '\n' + '-' * 120 + '\n'  ## Creates variable for separator to organize the sections.
+
+print(separator)
+
+## Opens the Doc string, which was entered by the user.
+
+with open(doc,'r') as f:
+    prev_line = ''  ###  Empty string that acts like a switch. It is populated by "Received" when the currentl line being iterated through is
+    ## a continuing line of a "Recieved" hop in the headers. When a non received line is encountered, the switch is turned off
+    ## by emptying the string once again. This is used in the conditional statements below to check if a line is relevant.
+
+
+    for line in f:  ## Iterate through the lines in the headers.
+
+        ## Checks if line starts with "Return-Path", capture the email address on the line and assign it to var envelope_from.
+        if re.match('Return-Path:', line):
+            envelope_ = re.search('([A-Za-z0-9-\.]+@[A-Za-z0-9-\.]+)', line)
+            envelope_from = envelope_.groups()[0]
+            continue
+
+        ## Checks if line begins with "message-id", which then stores the line in var message_id to print in a later section.
+        elif re.match('Message-ID', line) or re.match('Message-Id', line):
+            message_id = line
+            continue
+
+        ## Checks if line starts with "From" and if the 'header_from" variable doesn't already exists, which then captures the email address in
+        ## the line and the domain. It writes the email address and domain in var's header_from (email address) and domain_ (for domain). It
+        ## then writes these two values to files 'd' and 'm' (which were opened earlier).
+        elif re.match('From', line) and 'header_from' not in locals():
+            h_f = re.search('([A-Za-z0-9-\.]+@[A-Za-z0-9-\.]+)', line)
+            d_ = re.search('@([A-Za-z0-9-\.]+)', line)
+            header_from = h_f.groups()[0]
+            domain_ = d_.groups()[0]
+            continue
+
+        ## Checks if line starts with "Date", and saves the line to var date_sent for later use.
+        elif re.match('Date', line):
+            date_sent = line
+            continue
+
+        ## Checks if the line starts with something other than "Received" or whitespace.
+        elif re.match('[^Received]', line) and re.match('[^\s]+', line):
+            if prev_line == 'Received':  ## If the prev_line string is set to 'Received', empty the string variable.
+                prev_line = ''
+                continue
+            else:
+                continue
+
+        ## If the line begins with a whitespace and the string prev_line is already empty, then continue to the next line.
+        elif re.match('\s+', line):
+            if prev_line == '':
+                continue
+
+        ## If the line begins with 'Received', set the prev_line string to 'Received'.
+        elif re.match('Received', line):
+            prev_line = 'Received'
+            if re.match('Received-SPF', line):  ### If line begins with 'Received-SPF', capture the connecting IP and write to file c.
+                c_ip = re.search('client-ip=(.*);', line)
+                conn_ip = c_ip.groups()[0]
+
+
+        ## If nothing else matches in the specified conditionals, move on to the next line.
+        else:
+            continue
+
+        print(line)  ### Print the line if none of the conditionals lead to 'continue'.
+
+print(separator)
+
+## If date_sent is populated, print, else file being parsed is a sent header and there is not received date.
+if 'date_sent' in locals():
+    print(date_sent)
+
+## If message_id is populated, print, else there is no message-id in the headers.
+if 'message_id' in locals():
+    print(message_id)
+else:
+    print("No Message ID in header")
+
+## If envelope_from is populated, print variable, else these are sent headers and there is no envelope from present.
+if 'envelope_from' in locals():
+    print('Envelope From ---> ' + envelope_from)
+
+## Print header_from
+print('Header From ---> ' + header_from)
+
+
+## Print conn_ip content if populated, else print sent header information.
+if 'conn_ip' in locals():
+    print('Connecting IP ---> ' + conn_ip + '\n')
+
+print(separator)
+
+## This section will have SPF lookup with result and mechanism that IP is in.
+## print(separator)
+
+print("DNS Record for %s\n\n" % domain_)
+
+## MX
+MX = DNS.dnslookup(domain_,'mx')
+print([r1 + "\n" for r1 in MX])
+
+## SPF
+def spf_lookup(ip, domain):
+    TXT = DNS.dnslookup(domain,'txt')
+    if any('v=spf1' in txt for txt in TXT):
+        SPF = [s for s in TXT if 'v=spf1' in s]
+        print(SPF[0])
+    spfv, *mechs, flag = SPF[0].split()
+    return ip_check(ip, mechs)
+
+def ip_check(ip,list_of_mechanisms):
+    if re.match('[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+',ip):
+        return ipv4_check(ip, list_of_mechanisms)
+    elif re.match('([0-9A-Za-z]+:+)+[0-9a-zA-Z]+',ip):
+        return ipv6_check(ip, list_of_mechanisms)
+
+def ipv4_check(ip4, mechanisms):
+    ## Check ipv4 for a match in mechanisms
+    for check in mechanisms:
+        mech_temp = check.split(':')
+        if mech_temp[0] == 'ip6':
+            continue
+        elif mech_temp[0] == 'ip4':
+            if ip4_check(ip4, mech_temp[1]) == True:
+                return check
+        if mech_temp[0] == 'a':
+            if a_check(ip4, mech_temp[1]) == True:
+                return check
+        if mech_temp[0] == 'mx':
+            if mx_check(ip4, mech_temp[1]) == True:
+                return check
+        if mech_temp[0] == 'ptr':
+            if ptr_check(ip4, mech_temp[1]) == True:
+                return check
+        if mech_temp[0] == 'exists':
+            if exists_check == True:
+                return check
+        if mech_temp[0] == 'include':
+            if include_check == True:
+                return check
+        if mech_temp[0] == 'redirect':
+                
+                return check
+        
+
+
+def ipv6_check(ip6, mechnaisms):
+    ## Check ipv6 for a match in mechanisms       
+
+
+## DKIM
+## DMARC
+## A
