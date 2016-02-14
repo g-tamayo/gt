@@ -1,77 +1,153 @@
 ## SPF
-import DNS, re
+import DNS, re, ipaddress
 
-class SPF_Record:
+
+class SpfRecord:
+
 
     def __init__(self, domain):
         self.domain = domain
-        self.txt = self.txt_retrieve()
+        self.txt = DNS.dnslookup(self.domain, 'txt')
         self.spf = self.spf_retrieve()
         self.spf_version, self.mechanisms, self.spf_flag = self.mechanisms_retrieve()
 
-    def txt_retrieve(self):
-        return DNS.dnslookup(self.domain, 'txt')
-
     def spf_retrieve(self):
         for record in self.txt:
-            if 'v=spf1' in record[0].decode('utf-8'):
+            if b'v=spf1' in record[0]:
                 return record[0].decode('utf-8')
             else:
                 return None
 
     def mechanisms_retrieve(self):
-        spfv, *mechs, flag = self.spf.split()
-        return spfv, mechs, flag
+        if 'redirect' in self.spf:
+            spf, redir = self.spf.split()
+            redir_domain = redir.split('=')[1]
+            return spf, redir_domain, None
+        else:
+            spfv, *mechs, flag = self.spf.split()
+            return spfv, mechs, flag
 
-test = SPF_Record('gmail.com')
-print(test.spf)
-print(test.mechanisms)
+    def mech_iter(self):
+        num = 0
+        while num < len(list(self.mechanisms)):
+            try:
+                yield self.mechanisms[num]
+                num += 1
+            except StopIteration:
+                return None
 
-def spf_lookup(ip, domain):
-    txt = DNS.dnslookup(domain,'txt')
-    if any('v=spf1' in txt for txt in txt):
-        spf = [s for s in txt if 'v=spf1' in s]
-        print(spf[0])
-    spfv, *mechs, flag = spf[0].split()
-    return ip_check(ip, mechs)
+'''
+def ip_check(ip):
 
-def ip_check(ip,list_of_mechanisms):
+
     if re.match('[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+',ip):
-        return ipv4_check(ip, list_of_mechanisms)
+        return 4
+
     elif re.match('([0-9A-Za-z]+:+)+[0-9a-zA-Z]+',ip):
-        return ipv6_check(ip, list_of_mechanisms)
-
-def ipv4_check(ip4, mechanisms):
-    ## Check ipv4 for a match in mechanisms
-    for check in mechanisms:
-        mech_temp = check.split(':')
-        if mech_temp[0] == 'ip6':
-            continue
-        elif mech_temp[0] == 'ip4':
-            if ip4_check(ip4, mech_temp[1]) == True:
-                return check
-        if mech_temp[0] == 'a':
-            if a_check(ip4, mech_temp[1]) == True:
-                return check
-        if mech_temp[0] == 'mx':
-            if mx_check(ip4, mech_temp[1]) == True:
-                return check
-        if mech_temp[0] == 'ptr':
-            if ptr_check(ip4, mech_temp[1]) == True:
-                return check
-        if mech_temp[0] == 'exists':
-            if exists_check == True:
-                return check
-        if mech_temp[0] == 'include':
-            if include_check == True:
-                return check
-        if mech_temp[0] == 'redirect':
-
-                return check
-
-
+        return 6
 '''
-def ipv6_check(ip6, mechnaisms):
-    ## Check ipv6 for a match in mechanisms
 
-'''
+
+def ip_mech_check(spf_ip):
+
+    global dns_lookups
+    default = None
+
+    while True:
+
+        current = next(domains[namespace[-1]].mech_iter()).split(':')
+
+        if current is None:
+            break
+        elif dns_lookups > 10:
+            return 'PermError'
+
+        else:
+            if current[0] == 'ip6' and spf_ip.version == 6:
+                if ip6_check(spf_ip, current[1]) is True:
+                    return current
+
+            elif current[0] == 'ip4' and spf_ip.version == 4:
+                if ip4_check(spf_ip, current[1]) is True:
+                    return current
+
+            elif current[0] == 'a':
+                dns_lookups += 1
+                if a_check(ip, current[1]) is True:
+                    return current
+
+            elif current[0] == 'mx' and '/' in current[1]:
+                dns_lookups += 1
+                mx_subnet = current[1].split('/')
+                if mxsub_check(spf_ip, mx_subnet) is True:
+                    return current
+
+            elif current[0] == 'mx':
+                dns_lookups += 1
+                if len(current) == 1 and mx_check(spf_ip, namespace[-1]) is True:
+                    return current
+                elif mx_check(ip, current[1]) is True:
+                    return current
+
+            elif current[0] == 'ptr':
+                if ptr_check(spf_ip, current[1]) is True:
+                    return current
+
+            elif current[0] == 'exists':
+                if exists_check(current[1]) is True:
+                    return current
+
+            elif current[0] == 'include':
+                if include_check(current[1]) is True:
+                    return current
+
+    return default
+
+
+def a_check(ip, match):
+
+    match_list = DNS.dnslookup(match,'a')
+    if ip in match_list:
+        return True
+    else:
+        return False
+
+
+def mx_check(ip, match):
+
+    mx_records = sorted(DNS.dnslookup(match, 'mx'))
+    for priority, mxrr in mx_records:
+        if a_check(ip, mxrr) is True:
+            return True
+        else:
+            return False
+
+
+def mxsub_check(ip, rr):
+
+
+
+### Dict for storing other redirects/domains.
+
+
+domains = {}
+namespace = []
+dns_lookups = 0
+
+dotcom = 'yahoo.com'
+conn_ip = ipaddress.ip_address('192.0.78.24')
+domains[dotcom] = SpfRecord(dotcom)
+namespace.append(dotcom)
+### ipv = ip_check(conn_ip)
+
+
+while True:
+
+    if domains[namespace[-1]].spf_flag is None:
+        namespace.append(domains[namespace[-1]].mechanisms)
+        domains[namespace[-1]] = SpfRecord(namespace[-1])
+        dns_lookups += 1
+    else:
+        break
+
+print(next(domains[namespace[-1]].mech_iter()).split(':'))
