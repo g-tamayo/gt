@@ -100,11 +100,8 @@ def ip_mech_check(oip, domain):
 
             current = current.split(':', 1)
 
-            if current[0] == 'ip6' and spf_ip.version == 6:
-                spf_match = ip6_check(spf_ip, current[1])
-
-            elif current[0] == 'ip4' and spf_ip.version == 4:
-                spf_match = ip4_check(spf_ip, current[1])
+            if 'ip' in current[0]:
+                spf_match = ip_check(spf_ip, current[1])
 
             elif 'a' in current[0]:  # Checks A/AAAA records for both ipv4 and ipv6
                 if len(current) == 1 and '/' in current[0]:
@@ -167,11 +164,7 @@ def ip_mech_check(oip, domain):
 # it will check network based on mechanism's instructions.
 
 
-def ip6_check(ip, match):
-    return ip in ipaddress.ip_network(match, strict=False)
-
-
-def ip4_check(ip, match):
+def ip_check(ip, match):
     return ip in ipaddress.ip_network(match, strict=False)
 
 
@@ -212,7 +205,7 @@ def mx_check(ip, match, dns_count):
 def mx_subnet_check(ip, mxrr, dns_count):
 
     domains[sys.argv[2]].dns_lookups += 1
-    mx_records = sorted(DNS.dnslookup(mxrr[0],'mx'))
+    mx_records = sorted(DNS.dnslookup(mxrr[0],'mx'))  # Sorts records based on priority
     cidr = mxrr[1]
     mxrr_ip = []
     for priority, mxrr in mx_records:
@@ -277,8 +270,6 @@ def flag_result(flag, s_ip, dom):
 
 domains = {}
 
-sys.argv = ['spf', '64.18.10.18', 'gmail.com']
-
 try:
     ip = sys.argv[1]
     ip = ipaddress.ip_address(ip)
@@ -308,7 +299,7 @@ if domain and ip:
 
 # Following formats results and prints out in readable format for user.
 
-    print('\nSPF Result' + '\n' + '-' * 120)
+    print('\nSPF Result' + '\n' + '-' * 11)
 
     if spf_result and total_dns > 10:
         print('Result: Pass')
@@ -327,7 +318,7 @@ if domain and ip:
 
     # Additional information shows total DNS queries and any other information available.
 
-    print('\nAdditional Information' + '\n' + '-' * 120)
+    print('\nAdditional Information' + '\n' + '-' * 22)
 
     if total_dns > 10:
         print('PermError due to too many DNS lookups (RFC 4408)')
