@@ -270,7 +270,7 @@ domains = {}
 try:
     ip = sys.argv[1] 
     ip = ipaddress.ip_address(ip)
-except ValueError:
+except (ValueError, IndexError):
     ip = None
     print('Please enter a valid IP')
 
@@ -294,7 +294,6 @@ if domain and ip:
         rfc7208 = True
 
 ### Following formats results and prints out in readable format for user.
-### Additional information shows total DNS queries and any other information available.
 
     print('\nSPF Result' + '\n' + '-' * 120)
 
@@ -312,6 +311,8 @@ if domain and ip:
         print(flag_result(spf_flag))
     else:
         print('See Additional Information')
+        
+    ### Additional information shows total DNS queries and any other information available.
 
     print('\nAdditional Information' + '\n' + '-' * 120)
 
