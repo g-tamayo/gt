@@ -1,5 +1,4 @@
-## SPF Check Tool
-## Author: George Tamayo
+## SPF
 
 import DNS, ipaddress  ### Import py3dns for dns queries
 import itertools, sys
@@ -13,7 +12,10 @@ class SpfRecord:
     def __init__(self, domain):
         self.domain = domain
         self.permerror = False
-        self.txt = DNS.dnslookup(self.domain, 'txt')  ## Perform DNS query on domain
+        try:
+            self.txt = DNS.dnslookup(self.domain, 'txt')  ## Perform DNS query on domain
+        except DNS.Base.ServerError:
+            self.txt = None
         self.dns_lookups = 1
         if self.txt:   ### If query returns a result, continue to find SPF info, else no TXT records exist
             self.spf = self.spf_retrieve()
@@ -60,9 +62,9 @@ class SpfRecord:
 def ip_mech_check(oip, domain):
 
     namespace = []   ### Keeps track of multiple domains if redirect or include are called on in mechanism
-    spf_ip = ipaddress.ip_address(oip)
 
     namespace.append(domain)
+
 
     spf_match = False
     matches = []
@@ -260,49 +262,53 @@ def flatten(results):   ### Flattens results in case of nested lists.
 domains = {}
 
 try:
-    ip = sys.argv[1]
-except:
-    raise 'Please enter a valid IP'
+    ip = ipaddress.ip_address(sys.argv[1])
+except ValueError:
+    ip = None
+    print('Please enter a valid IP')
 
 try:
     domain = sys.argv[2]
-except:
-    raise 'Please enter a valid domain'
+    domains[domain] = SpfRecord(domain)
+except (IndexError, NameError):
+    domain = None
+    print('Please enter a valid domain')
 
+if domain and ip:
+    spf_result = ip_mech_check(ip, domain)
+    total_dns = domains[domain].dns_lookups
+    spf_flag = domains[domain].spf_flag
 
-domains[domain] = SpfRecord(domain)
-spf_result = ip_mech_check(ip, domain)
-total_dns = domains[domain].dns_lookups
-spf_flag = domains[domain].spf_flag
+    output = list(flatten(spf_result))
 
-output = list(flatten(spf_result))
+    ### Following formats results and prints out in readable format for user.
+    ### Additional information shows total DNS queries and any other information available.
 
-### Following formats results and prints out in readable format for user.
-### Additional information shows total DNS queries and any other information available.
+    print('\nSPF Result' + '\n' + '-' * 120)
 
-print('\nSPF Result' + '\n' + '-' * 120)
+    if spf_result and total_dns > 10:
+        print('Result: Pass')
+        print('***** PermError for RFC violation *****')
+        print('%s is an authorized sender on behalf of %s' % (ip, domain))
+        print('Mechanism: ' + ' ---> '.join(output))
+    elif spf_result:
+        print('Result: Pass')
+        print('%s is an authorized sender on behalf of %s' % (ip, domain))
+        print('Mechanism: ' + ' ---> '.join(output))
+    elif domains[domain].spf_flag:
+        print('Result: ' + spf_fail(spf_flag))
+        print(flag_result(spf_flag))
+    else:
+        print('See Additional Information')
 
-if spf_result and total_dns > 10:
-    print('Result: Pass')
-    print('***** PermError for RFC violation *****')
-    print('%s is an authorized sender on behalf of %s' % (ip, domain))
-    print('Mechanism: ' + ' ---> '.join(output))
-elif spf_result:
-    print('Result: Pass')
-    print('%s is an authorized sender on behalf of %s' % (ip, domain))
-    print('Mechanism: ' + ' ---> '.join(output))
-elif domains[domain].spf_flag:
-    print('Result: ' + spf_fail(spf_flag))
-    print(flag_result(spf_flag))
+    print('\nAdditional Information' + '\n' + '-' * 120)
+
+    if total_dns > 10:
+        print('PermError due to too many DNS lookups (RFC-4408)')
+        print('Total DNS Lookups = %i' % total_dns)
+    elif not domains[domain].spf and domains[domain].permerror:
+        print('No single valid SPF record exists for "%s"' % domain)
+    elif total_dns <=10:
+        print('DNS Queries Performed: %i' % total_dns)
 else:
-    print('See Additional Information')
-
-print('\nAdditional Information' + '\n' + '-' * 120)
-
-if total_dns > 10:
-    print('PermError due to too many DNS lookups (RFC-4408)')
-    print('Total DNS Lookups = %i' % total_dns)
-elif not domains[domain].spf and domains[domain].permerror:
-    print('No single valid SPF record exists for "%s"' % domain)
-elif total_dns <=10:
-    print('DNS Queries Performed: %i' % total_dns)
+    sys.exit(0)
