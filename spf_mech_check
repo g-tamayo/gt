@@ -307,7 +307,7 @@ if domain and ip:
         print('PermError due to too many DNS lookups (RFC-4408)')
         print('Total DNS Lookups = %i' % total_dns)
     elif not domains[domain].spf and domains[domain].permerror:
-        print('No single valid SPF record exists for "%s"' % domain)
+        print('No single valid SPF record exists for domain "%s"' % domain)
     elif total_dns <=10:
         print('DNS Queries Performed: %i' % total_dns)
 else:
