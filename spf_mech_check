@@ -141,8 +141,11 @@ def ip_mech_check(spf_ip, domain):
     else:
         return None
 
-# The following functions are checks. If a cidr-length is detected (eg, 127.0.0.1/8),
-# it will check network based on mechanism's instructions.
+
+'''
+The following functions are checks. If a cidr-length is detected (eg, 127.0.0.1/8),
+it will check network based on mechanism's instructions.
+'''
 
 
 def ip_check(ip, match):
@@ -215,8 +218,10 @@ def ptr_check(ip, domain):
 
 def redirect(redirect_domain):
 
-    # If spf_flag is set for redirect, create additional SPFRecord object
-    # with domain listed (eg, redirect:otherdomain.com)
+    '''
+    If spf_flag is set for redirect, create additional SPFRecord object
+    with domain listed (eg, redirect:otherdomain.com)
+    '''
 
     namespace = [redirect_domain]
 
@@ -231,7 +236,7 @@ def redirect(redirect_domain):
     return namespace[-1]
 
 
-def flatten(results):   # Flattens results in case of nested lists.
+def flatten(results):  # Flattens results in case of nested lists.
 
     if results:
         temp = results
@@ -269,6 +274,8 @@ def flag_result(flag, s_ip, dom):
 
 domains = {}
 
+sys.argv = ['spf', '72.14.230.254', 'lmiranda.info']
+
 try:
     ip = sys.argv[1]
     ip = ipaddress.ip_address(ip)
@@ -286,6 +293,9 @@ try:
 except (IndexError, NameError):
     print('Please enter a valid domain')
     domain = None
+except DNS.Base.TimeoutError:
+    print('DNS Temp Error')
+    sys.exit(0)
 
 if domain and ip:
 
@@ -300,7 +310,7 @@ if domain and ip:
     spf_flag = domains[spf_domain].spf_flag
     rfc7208 = None
 
-    output = domains[sys.argv[2]].redirects + list(flatten(spf_result))
+    output = list(flatten(spf_result))
 
     if 'ptr:' in ' '.join(output):
         rfc7208 = True
@@ -309,16 +319,16 @@ if domain and ip:
 
     print('\nSPF Result' + '\n' + '-' * 11)
 
-    if spf_result and total_dns > 10:
+    if output and total_dns > 10:
         print('Result: Pass')
         print('***** PermError for RFC violation *****')
         print('%s is an authorized sender on behalf of %s' % (ip, domain))
-        print('Mechanism: ' + '\n\t  ---> '.join(output))
-    elif spf_result:
+        print('Mechanism: ' + '\n\t  ---> '.join(domains[sys.argv[2]].redirects + output))
+    elif output:
         print('Result: Pass')
         print('%s is an authorized sender on behalf of %s' % (ip, domain))
-        print('Mechanism: ' + '\n\t  ---> '.join(output))
-    elif spf_flag:
+        print('Mechanism: ' + '\n\t  ---> '.join(domains[sys.argv[2]].redirects + output))
+    elif not output:
         print('Result: ' + spf_fail(spf_flag))
         print(flag_result(spf_flag, ip, domain))
     else:
