@@ -270,8 +270,6 @@ def flag_result(flag, s_ip, dom):
 
 domains = {}
 
-sys.argv = ['spf', '2800:3f0:4000::5', 'test@gmail.com']
-
 try:
     ip = sys.argv[1]
     ip = ipaddress.ip_address(ip)
