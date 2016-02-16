@@ -5,7 +5,7 @@
 #   an authorized sender, and shows which mechanisms matched (if pass).
 
 import DNS, ipaddress  ### Import py3dns for dns queries
-import itertools, sys
+import itertools, sys, re
 
 # Class to create SPF records for domains being tested
 
@@ -260,7 +260,7 @@ def flag_result(flag, s_ip, dom):
     flag_mechanisms = {
         '+': 'SPF Policy allows sender with %s ' % flag,
         '-': 'SPF Policy does not authorize %s on behalf of "%s"' % (s_ip, dom),
-        '~': 'SPF Policy does not authorize %s on behalf of %s but accept and mark the message' % (s_ip, dom),
+        '~': 'SPF Policy does not authorize %s on behalf of %s \nAccept and mark the message' % (s_ip, dom),
         '?': 'SPF Policy does not explicitly define if sender is authorized or not'
     }
     return flag_mechanisms[flag[0]]
@@ -270,19 +270,25 @@ def flag_result(flag, s_ip, dom):
 
 domains = {}
 
+sys.argv = ['spf', '2800:3f0:4000::5', 'test@gmail.com']
+
 try:
     ip = sys.argv[1]
     ip = ipaddress.ip_address(ip)
 except (ValueError, IndexError):
-    ip = None
     print('Please enter a valid IP')
+    ip = None
 
 try:
     domain = sys.argv[2]
+    if re.search('@.+\..+\.?.+', domain):
+        strip = re.search('@(.+\..+\.?.+)', domain)
+        sys.argv[2] = strip.groups()[0]
+        domain = sys.argv[2]
     domains[domain] = SpfRecord(domain)
 except (IndexError, NameError):
-    domain = None
     print('Please enter a valid domain')
+    domain = None
 
 if domain and ip:
 
@@ -309,7 +315,7 @@ if domain and ip:
     elif spf_result:
         print('Result: Pass')
         print('%s is an authorized sender on behalf of %s' % (ip, domain))
-        print('Mechanism: ' + ' ---> '.join(output))
+        print('Mechanism: ' + '\n\t  ---> '.join(output))
     elif spf_flag:
         print('Result: ' + spf_fail(spf_flag))
         print(flag_result(spf_flag, ip, domain))
@@ -332,4 +338,5 @@ if domain and ip:
             print('Warning: PTR should not be used (RFC 7208)')
         print('DNS Queries Performed: %i\n' % total_dns)
 else:
+    print('Example - spfcheck 127.0.0.1 example.com')
     sys.exit(0)
