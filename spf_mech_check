@@ -149,12 +149,10 @@ def a_check(ipa, mech, arg, c_domain, o_domain):
     else:
         if not arg:
             match_list = DNS.dnslookup(c_domain.domain,'a')
-            if str(ipa) in match_list:
-                return True
         else:
             match_list = DNS.dnslookup(arg,'a')
-            if str(ipa) in match_list:
-                return True
+        if str(ipa) in match_list:
+            return True
     return False
 
 
