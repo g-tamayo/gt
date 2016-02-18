@@ -7,33 +7,40 @@
 # Arguments passed are connecting IP being checked and sender domain/address,
 # eg, 'spfcheck 127.0.0.1 sender@example.com'.
 
-import DNS, ipaddress  ### Import py3dns for dns queries
-import itertools, sys, re
+import itertools
+import re
+import sys
+import ipaddress
+import DNS
 
 
-# Class to create SPF records for domains being tested
-
-class SpfRecord:
+class SpfRecord:  # Class to create SPF records for domains being tested
 
 
-    def __init__(self, domain):
+    def __init__(self, domain, original_domain):
         self.domain = domain
-        self.permerror = False
+        self.original = original_domain
+        self.dns_lookups = 0
+        self.permerror = ''
         self.redirects = []
+        self.txt = None
+        self.spf = None
+        self.mechanisms = []
+        self.spf_flag = None
+
+    def txt_retrieve(self):
         try:
             self.txt = DNS.dnslookup(self.domain, 'txt')  ## Perform DNS query on domain
-        except DNS.Base.ServerError:
-            self.txt = None
-        self.dns_lookups = 1
-        if self.txt:   # If query returns a result, continue to find SPF info, else no TXT records exist
+            self.dns_lookups += 1
             self.spf = self.spf_retrieve()
-            self.spf_version, self.mechanisms, self.spf_flag = self.mechanisms_retrieve()
-        else:
-            self.spf = None
-            self.spf_flag = None
-            self.mechanisms = []
-            self.permerror = True
-
+            self.mechanisms, self.spf_flag = self.mechanisms_retrieve()
+        except DNS.Base.ServerError:
+            if self.domain != self.original:  # If not original domain, set to PermError
+                self.original.spf_flag = None  # Set SPF to None and mechanisms as empty
+                self.original.mechanisms = []  # This is so the function will cease and return a None result overall
+                self.original.permerror = self.domain
+            else:  # If no SPF records exist on main domain being queried, no PermError, SPF = None
+                self.permerror = self.domain
 
     def spf_retrieve(self):   # Iterates through txt records to find SPF record
         vspf = []
@@ -41,196 +48,202 @@ class SpfRecord:
             if b'v=spf1' in record[0]:
                 vspf.append(record[0].decode('utf-8'))
         if len(vspf) > 1:
-            self.permerror = True   # Sets permerror variable to True if multiple SPF records exist
+            print('\nPermError')   # Stops if multiple SPF records exist
+            print('Multiple SPF records exist for domain %s\n' % self.domain)
+            print('Records \n' + '\n'.join(vspf))
             return None
         elif len(vspf) == 1:
             return vspf[0]
         else:
             return None
 
+
     def mechanisms_retrieve(self):
         if 'redirect' in self.spf:   # If redirect is in record, set mechanism to redirect to the next domain
             spf, redir = self.spf.split()
             redir_domain = redir.split('=')[1]
-            return spf, redir_domain, 'redirect'
+            return redir_domain, 'redirect'
         else:
-            spfv, *mechs, flag = self.spf.split()
-            return spfv, mechs, flag
-
-    def __next__(self):   # Allows iteration through mechanisms in record
-        for mech in self.mechanisms:
-            if len(self.mechanisms) > 0:
-                return self.mechanisms.pop(0)
-            else:
-                return None
+            _, *mechs, flag = self.spf.split()
+            return mechs, flag
 
 
-# Main function that checks on mechanism, then acts accordingly by calling other functions to perform further lookups
-
-def ip_mech_check(spf_ip, domain):
+def ip_mech_check(spf_ip, current_domain, first_domain):  # Main function that iterates through mechanisms, calls on other functions to check
 
     spf_match = False
     matches = []
 
-    while spf_match is False:
+    for m in current_domain.mechanisms:
 
-        current = next(domains[domain])
+        current_mech = m
 
-        if not current:
+        if spf_match:
             break
 
-        else:  # If mechanism is returned begin checks
+        else:  # If mechanism is returned, begin checks.
 
-            current = current.split(':', 1)
+            mechanism, argument = current_mech.split(':', 1)   # Change variable for readability
 
-            if 'ip' in current[0]:
-                spf_match = ip_check(spf_ip, current[1])
+            if 'ip' in mechanism:
+                spf_match = ip_check(spf_ip, argument)
 
-            elif 'a' in current[0]:  # Checks A/AAAA records for both ipv4 and ipv6
-                if len(current) == 1 and '/' in current[0]:
-                    a_subnet = current[0].split('/')
-                    spf_match = a_subnet_check(spf_ip, [domain, a_subnet[1]])
-                elif len(current) == 1:
-                    spf_match = a_check(spf_ip, domain)
-                elif '/' in current[1]:
-                    a_subnet = current[1].split('/')
-                    spf_match = a_subnet_check(spf_ip, [domain, a_subnet[1]])
-                else:
-                    spf_match = a_check(spf_ip, current[1])
+            elif 'a' in mechanism:  # Checks A/AAAA records for both ipv4 and ipv6
+                spf_match = a_check(spf_ip, mechanism, argument, current_domain, first_domain)
 
-            elif 'mx' in current[0]:
-                if len(current) == 1 and '/' in current[0]:
-                    mx_subnet = current[0].split('/')
-                    spf_match = mx_subnet_check(spf_ip, domain + '/' + mx_subnet[1])
-                elif len(current) == 1:
-                    spf_match = mx_check(spf_ip, domain)
-                elif '/' in current[1]:
-                    spf_match = mx_subnet_check(spf_ip, current[1])
-                else:
-                    spf_match = mx_check(spf_ip, current[1])
+            elif 'mx' in mechanism:
+                spf_match = mx_check(spf_ip, mechanism, argument, current_domain, first_domain)
 
-            elif 'ptr' in current[0]:
-                if len(current) == 1:
-                    spf_match = ptr_check(spf_ip, domain)
-                else:
-                    spf_match = ptr_check(spf_ip, current[1])
+            elif 'ptr' in mechanism:
+                spf_match = ptr_check(spf_ip, argument, current_domain, first_domain)
 
-            elif 'exists' in current[0]:
-                try:
-                    DNS.dnslookup(current[1], 'a')
-                    spf_match = True
-                except DNS.Base.ServerError:
-                    spf_match = False
+            elif 'exists' in mechanism:
+                spf_match = exists_check(argument, first_domain)
 
-            elif 'include' in current[0]:
-                domains[sys.argv[2]].dns_lookups += 1
-                domains[current[1]] = SpfRecord(current[1])
-                include_check = ip_mech_check(spf_ip, current[1])
+            elif 'include' in mechanism:
+                spf_match = include_check(spf_ip, argument, first_domain)
 
-                if domains[current[1]].spf and include_check:
+               '''
+                first_domain.dns_lookups += 1
+                include_domain = SpfRecord(argument, first_domain.domain)
+                include_domain.txt_retrieve()
+                include_check = ip_mech_check(spf_ip, include_domain, first_domain)
+                if include_domain.spf and include_check:
                     matches.append(include_check)
                     spf_match = True
-                elif not domains[current[1]].spf:
-                    domains[sys.argv[2]].permerror = True
+                elif not include_domain.spf:
                     return None
+                '''
 
     if spf_match is True:
-        matches.append(':'.join(current))
+        matches.append(''.join(current_mech))
         results = matches
         return results
     else:
         return None
 
 
-'''
+"""
 The following functions are checks. If a cidr-length is detected (eg, 127.0.0.1/8),
 it will check network based on mechanism's instructions.
-'''
+"""
 
 
 def ip_check(ip, match):
     return ip in ipaddress.ip_network(match, strict=False)
 
 
-def a_check(ipa, match):
+def a_check(ipa, mech, arg, c_domain, o_domain):
 
-    domains[sys.argv[2]].dns_lookups += 1
-    match_list = DNS.dnslookup(match,'a')
-    if str(ipa) in match_list:
-        return True
-    else:
-        return False
+    o_domain.dns_lookups += 1  # Functions that require a dns query increments dns count in SPFRecord object
 
-
-# Arguments passed are connecting ip,[domain, cidr-length], and main domain for total DNS query count.
-
-def a_subnet_check(ipa, domain_cidr):
-
-    domains[sys.argv[2]].dns_lookups += 1
-    match_list = DNS.dnslookup(domain_cidr[0],'a')
-    cidr = domain_cidr[1]
-    for a_ip in match_list:
-        if ipa in ipaddress.ip_network(a_ip + '/' + cidr, strict=False):
-            return True
-    return False
-
-
-def mx_check(ip, match):
-
-    domains[sys.argv[2]].dns_lookups += 1
-    mx_records = sorted(DNS.dnslookup(match, 'mx'))
-    for priority, mx_rr in mx_records:
-        if a_check(ip, mx_rr) is True:
-            return True
-    return False
-
-
-def mx_subnet_check(ip, mx_cidr):
-
-    domains[sys.argv[2]].dns_lookups += 1
-    mxrr = mx_cidr.split('/')
-    mx_records = sorted(DNS.dnslookup(mxrr[0],'mx'))  # Sorts records based on priority
-    cidr = mxrr[1]
-    mxrr_ip = []
-    for priority, mxrr in mx_records:
-        mxrr_ip.append(DNS.dnslookup(mxrr,'a'))
-    mx_a = list(itertools.chain.from_iterable(mxrr_ip))
-    for a_ip in mx_a:
-        if ip in ipaddress.ip_network(a_ip + '/' + cidr, strict=False):
-            return True
-    return False
-
-
-def ptr_check(ip, domain):
-
-    domains[sys.argv[2]].dns_lookups += 1
-    try:
-        ip_ptr = DNS.revlookupall(str(ip))
-        for ptr_rr in ip_ptr:
-            if domain in ptr_rr:
+    if '/' in mech or '/' in arg:
+        if not arg:
+            _, cidr = mech.split('/')
+            match_list = DNS.dnslookup(c_domain.domain,'a')
+        else:
+            domain_, cidr = arg.split('/')
+            match_list = DNS.dnslookup(domain_,'a')
+        for a_ip in match_list:
+            if ipa in ipaddress.ip_network(a_ip + '/' + cidr, strict=False):
                 return True
-            elif a_check(ip, ptr_rr):
+    else:
+        if not arg:
+            match_list = DNS.dnslookup(c_domain.domain,'a')
+            if str(ipa) in match_list:
+                return True
+        else:
+            match_list = DNS.dnslookup(arg,'a')
+            if str(ipa) in match_list:
+                return True
+    return False
+
+
+def mx_check(ipmx, mech, arg, c_domain, o_domain):
+
+    o_domain.dns_lookups += 1
+
+    if '/' in mech or '/' in arg:
+        if not arg:
+            cidr = mech.split('/')[1]  # Splits the record 'mx/xx' and keeps only the cidr-length 'xx'
+            mx_records = sorted(DNS.dnslookup(c_domain.domain,'mx'))  # Sorts records based on priority
+        else:
+            domain_, cidr = arg.split('/')
+            mx_records = sorted(DNS.dnslookup(domain_, 'mx'))
+        mxrr_ip = []
+        for priority, mx_rr in mx_records:
+            mxrr_ip.append(DNS.dnslookup(mx_rr,'a'))
+            mx_a = list(itertools.chain.from_iterable(mxrr_ip))
+        for a_ip in mx_a:
+            if ipmx in ipaddress.ip_network(a_ip + '/' + cidr, strict=False):
+                return True
+    else:
+        if not arg:
+            mx_records = sorted(DNS.dnslookup(c_domain.domain, 'mx'))
+        else:
+            mx_records = sorted(DNS.dnslookup(arg, 'mx'))
+        for priority, mx_rr in mx_records:
+            if a_check(ip, 'a', mx_rr, None, o_domain):
+                return True
+    return False
+
+
+def ptr_check(ipp, arg, c_domain, o_domain):
+
+    o_domain.dns_lookups += 1
+    if not arg:
+        domain_ = c_domain
+    else:
+        domain_ = arg
+    try:
+        ip_ptr = DNS.revlookupall(str(ipp))
+        for ptr_rr in ip_ptr:
+            if domain_ in ptr_rr:
+                return True
+            elif a_check(ip, '', ptr_rr, None, o_domain):
                 return True
         return False
     except DNS.Base.ServerError:   ### Returns False is DNS query does not return any records.
         return False
 
 
-def redirect(redirect_domain):
+def exists_check(arg, o_domain):
+    o_domain.dns_lookups += 1
+    try:
+        DNS.dnslookup(arg, 'a')
+        return True
+    except DNS.Base.ServerError:
+        return False
 
-    '''
+
+def include_check(ipi, arg, o_domain):
+    o_domain.dns_lookups += 1
+    include_domain = SpfRecord(arg, o_domain.domain)
+    include_domain.txt_retrieve()
+    include_check = ip_mech_check(spf_ip, include_domain, o_domain)
+    if include_domain.spf and include_check:
+        matches.append(include_check)
+        spf_match = True
+    elif not include_domain.spf:
+        return None
+
+
+def redirect(redirect_domain, main_domain):
+
+    """
     If spf_flag is set for redirect, create additional SPFRecord object
     with domain listed (eg, redirect:otherdomain.com)
-    '''
+    :param redirect_domain:
+    """
 
     namespace = [redirect_domain]
 
     while True:
-        if domains[namespace[-1]].spf_flag == 'redirect':
-            domains[sys.argv[2]].redirects.append('redirect=' + domains[namespace[-1]].mechanisms)
-            namespace.append(domains[namespace[-1]].mechanisms)
-            domains[namespace[-1]] = SpfRecord(namespace[-1])
-            domains[sys.argv[2]].dns_lookups += 1
+        if namespace[-1].spf_flag == 'redirect':
+            main_domain.redirects.append('redirect=' + namespace[-1].mechanisms)
+            temp_domain = SpfRecord(namespace[-1].mechanisms, main_domain)
+            namespace.append(temp_domain)
+            namespace[-1].txt_retrieve()
+            main_domain.dns_lookups += 1
         else:
             break
     return namespace[-1]
@@ -264,7 +277,8 @@ def flag_result(flag, s_ip, dom):
     flag_mechanisms = {
         '+': 'SPF Policy allows sender with %s ' % flag,
         '-': 'SPF Policy does not authorize %s on behalf of "%s"' % (s_ip, dom),
-        '~': 'SPF Policy does not authorize %s on behalf of %s \nAccept and mark the message' % (s_ip, dom),
+        '~': 'SPF Policy does not authorize %s on behalf of %s'
+             '\nAccept and mark the message' % (s_ip, dom),
         '?': 'SPF Policy does not explicitly define if sender is authorized or not'
     }
     return flag_mechanisms[flag[0]]
@@ -274,40 +288,46 @@ def flag_result(flag, s_ip, dom):
 
 domains = {}
 
-sys.argv = ['spf', '72.14.230.254', 'lmiranda.info']
+sys.argv = ['spf', '64.18.4.5', 'gmail.com']
 
 try:
     ip = sys.argv[1]
     ip = ipaddress.ip_address(ip)
 except (ValueError, IndexError):
-    print('Please enter a valid IP')
+    print('\nPlease enter a valid IP\n')
     ip = None
 
 try:
-    domain = sys.argv[2]
-    if re.search('@.+\..+\.?.+', domain):
-        strip = re.search('@(.+\..+\.?.+)', domain)
+    if re.search('@[\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]i+$', sys.argv[2]):
+        strip = re.search('@([\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]+)$', sys.argv[2])
         sys.argv[2] = strip.groups()[0]
         domain = sys.argv[2]
-    domains[domain] = SpfRecord(domain)
+    elif re.search('^[\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]+$', sys.argv[2]):
+        domain = sys.argv[2]
+    else:
+        raise NameError
 except (IndexError, NameError):
-    print('Please enter a valid domain')
+    print('\nPlease enter a valid domain or email address\n')
     domain = None
 except DNS.Base.TimeoutError:
-    print('DNS Temp Error')
+    print('\nDNS Temp Error')
     sys.exit(0)
 
 if domain and ip:
 
+    original_domain = SpfRecord(domain, domain)
+    original_domain.txt_retrieve()
+    domains[domain] = original_domain
+
     if domains[domain].spf_flag == 'redirect':
-        spf_domain = redirect(domain)
+        spf_domain = redirect(domains[domain], original_domain)
     else:
-        spf_domain = domain
+        spf_domain = domains[domain]
 
-    spf_result = ip_mech_check(ip, spf_domain)
+    spf_result = ip_mech_check(ip, spf_domain, original_domain)
 
-    total_dns = domains[sys.argv[2]].dns_lookups
-    spf_flag = domains[spf_domain].spf_flag
+    total_dns = original_domain.dns_lookups
+    spf_flag = original_domain.spf_flag
     rfc7208 = None
 
     output = list(flatten(spf_result))
@@ -323,32 +343,37 @@ if domain and ip:
         print('Result: Pass')
         print('***** PermError for RFC violation *****')
         print('%s is an authorized sender on behalf of %s' % (ip, domain))
-        print('Mechanism: ' + '\n\t  ---> '.join(domains[sys.argv[2]].redirects + output))
+        print('Mechanism: ' + '\n\t  ---> '.join(domains[domain].redirects + output))
     elif output:
         print('Result: Pass')
         print('%s is an authorized sender on behalf of %s' % (ip, domain))
-        print('Mechanism: ' + '\n\t  ---> '.join(domains[sys.argv[2]].redirects + output))
-    elif not output:
+        print('Mechanism: ' + '\n\t  ---> '.join(domains[domain].redirects + output))
+    elif not output and domains[domain].spf_flag:
         print('Result: ' + spf_fail(spf_flag))
         print(flag_result(spf_flag, ip, domain))
+    elif not domains[domain].spf_flag and domains[domain].permerror != domain:
+        print('PermError')
+        print('An "include" mechanism returned no SPF records')
     else:
-        print('See Additional Information')
+        print('None')
 
     # Additional information shows total DNS queries and any other information available.
 
     print('\nAdditional Information' + '\n' + '-' * 22)
 
     if total_dns > 10:
-        print('PermError due to too many DNS lookups (RFC 4408)')
+        print('PermError\nToo many DNS lookups (RFC 4408)')
         if rfc7208:
             print('Warning: PTR should not be used (RFC 7208)')
         print('Total DNS Lookups = %i\n' % total_dns)
-    elif not domains[sys.argv[2]].spf and domains[sys.argv[2]].permerror:
-        print('No single valid SPF record exists for "%s"\n' % sys.argv[2])
+    elif not domains[domain].spf:
+        print('No single valid SPF record exists for "%s"\n' % domain)
+    elif not domains[domain].spf_flag and domains[domain].permerror != domain:
+        print('Mechanism: include:%s' % domains[domain].permerror)
     elif total_dns <=10:
         if rfc7208:
             print('Warning: PTR should not be used (RFC 7208)')
         print('DNS Queries Performed: %i\n' % total_dns)
 else:
-    print('Example - spfcheck 127.0.0.1 example.com')
+    print('Examples\nspfcheck 127.0.0.1 example.com\nspfcheck 127.0.0.1 example@example.com')
     sys.exit(0)
