@@ -1,11 +1,8 @@
 # SPF Check Tool
-# Version: 1.0.5
+# Version: 1.1
 # Author: George Tamayo
-# Date: February 15, 2016
 # Description: This tool checks sender IP to determine if they are
 # an authorized sender, and shows which mechanisms matched (if pass).
-# Arguments passed are connecting IP being checked and sender domain/address,
-# eg, 'spfcheck 127.0.0.1 sender@example.com'.
 
 import itertools
 import re
