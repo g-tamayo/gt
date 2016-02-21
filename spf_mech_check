@@ -11,6 +11,7 @@ import DNS
 from pythonds import basic
 from enum import Enum, unique
 
+__author__ = 'George Tamayo gtamayo@'
 
 @unique
 class MechType(Enum):
@@ -170,24 +171,20 @@ def mx_check(ipmx, mech, arg, o_domain):
 def ptr_check(ipp, arg, o_domain):
     o_domain.dns_lookups += 1
     o_domain.rfc7208 = True
-    try:
-        ip_ptr = DNS.revlookupall(str(ipp))
-        for ptr_rr in ip_ptr:
-            if arg in ptr_rr:
-                return True
-            elif a_check(ipp, MechType.a.value, ptr_rr, o_domain):
-                return True
-        return False
-    except DNS.Base.ServerError:   ### Returns False is DNS query does not return any records.
-        return False
+    ip_ptr = DNS.revlookupall(str(ipp))
+    for ptr_rr in ip_ptr:
+        if arg in ptr_rr:
+            return True
+        elif a_check(ipp, MechType.a.value, ptr_rr, o_domain):
+            return True
+    return False
 
 
 def exists_check(arg, o_domain):
     o_domain.dns_lookups += 1
-    try:
-        DNS.dnslookup(arg, MechType.a.value)
+    if DNS.dnslookup(arg, MechType.a.value):
         return True
-    except DNS.Base.ServerError:
+    else:
         return False
 
 
@@ -234,6 +231,8 @@ def flag_result(flag, s_ip, dom):
 # Primary Code
 
 def main():
+
+    sys.argv = ['spf', '64.18.0.2', 'lmiranda.info']
 
     try:
         ip = sys.argv[1]
