@@ -11,7 +11,8 @@ import DNS
 from pythonds import basic
 from enum import Enum, unique
 
-__author__ = 'George Tamayo gtamayo@'
+__author__ = 'George Tamayo'
+
 
 @unique
 class MechType(Enum):
@@ -25,7 +26,7 @@ class MechType(Enum):
     cidr = '/'
 
 
-class SpfRecord:  # Class to create SPF records for domains being tested
+class SpfRecord:  # Class to create SPFRecord objects for domains being tested
 
 
     def __init__(self, domain):
@@ -46,18 +47,18 @@ def spf_retrieve(s_domain):   # Iterates through txt records to find SPF record
     for record in s_domain.txt:
         if b'v=spf1' in record[0]:
             vspf.append(record[0].decode('utf-8'))
-    if len(vspf) > 1:
+    if len(vspf) > 1:  # If multiple SPF records found, results in PermError
         s_domain.permerror = 'Multiple SPF records exist for domain %s\n' % s_domain.domain
         s_domain.spf = []
     elif len(vspf) == 1:
         s_domain.spf = vspf[0]
         s_domain.mechanisms, s_domain.spf_flag = mechanisms_retrieve(s_domain)
     else:
-        s_domain.spf = []
+        s_domain.spf = []  # If none found, set spf as empty list
 
 
 def mechanisms_retrieve(m_domain):
-    if MechType.redirect.value in m_domain.spf:   # If redirect is in record, set mechanism to redirect to the next domain
+    if MechType.redirect.value in m_domain.spf:   # If redirect, set mechanism to redirect to the next domain
         spf, redir = m_domain.spf.split()
         redir_domain = redir.split('=')[1]
         return redir_domain, MechType.redirect.value
@@ -65,29 +66,29 @@ def mechanisms_retrieve(m_domain):
         return m_domain.spf, None
     else:
         _, *mechs, flag = m_domain.spf.split()
-        return mechs, flag
+        return mechs, flag  # Returns mechanisms as list, and last mechanism as flag
 
 
 def ip_mech_check(spf_ip, current_domain, first_domain):  # Main function that iterates through mechanisms,
 
     spf_match = False
-    matches = basic.Stack()
+    matches = basic.Stack()  # Creates stack to keep track of any matches
     checking = current_domain.mechanisms
-    include_end = None
+    include_end = None  # If an include is detected, set this variable to the final mechanism in the new set of mechs
 
     for current_mech in checking:
 
-        try:
+        try:  # If mechanism is set for self-check (eg, a, mx, ptr) then set current domain as argument
             mechanism, argument = current_mech.split(':', 1)  # Change variables for readability
         except ValueError:
-            mechanism, argument = current_mech, current_domain.domain
+            mechanism, argument = current_mech, current_domain.domain 
 
-        if mechanism == MechType.include.value:
+        if mechanism == MechType.include.value:  # Include detected, insert new SPF record into list of mechanisms
             include_domain = SpfRecord(argument)
             spf_retrieve(include_domain)
 
             if not include_domain.mechanisms:
-                first_domain.permerror = argument
+                first_domain.permerror = argument  # If include lookup fails, check exits with PermError
                 break
             else:
                 first_domain.dns_lookups += 1
@@ -95,16 +96,16 @@ def ip_mech_check(spf_ip, current_domain, first_domain):  # Main function that i
                 new_index = 1
 
             for new_mech in include_domain.mechanisms:
-                checking.insert(checking.index(current_mech) + new_index, new_mech)
+                checking.insert(checking.index(current_mech) + new_index, new_mech)  # Insert new mechs into checking
                 new_index += 1
-            matches.push(current_mech)
+            matches.push(current_mech)  # Push mechanism from top level record in case of match
 
         else:
             spf_match = spf_mech_check(spf_ip, mechanism, argument, first_domain)
             if spf_match is True:
-                matches.push(current_mech)
+                matches.push(current_mech)  # If match found, push current_mech into matches list
                 break
-            elif current_mech == include_end:
+            elif current_mech == include_end:  # If include mechanism reaches end, pop mechanism from matches
                 matches.pop()
 
     if spf_match is True:
@@ -113,10 +114,10 @@ def ip_mech_check(spf_ip, current_domain, first_domain):  # Main function that i
         return None
 
 
-def spf_mech_check(spf_ip, mechanism, argument, first_domain):
+def spf_mech_check(spf_ip, mechanism, argument, first_domain):  # Routes to proper function based on mechanism type
     if MechType.ip.value in mechanism:
         return ip_check(spf_ip, argument)
-    elif MechType.a.value in mechanism:  # Checks A/AAAA records for both ipv4 and ipv6
+    elif MechType.a.value in mechanism:
         return a_check(spf_ip, mechanism, argument, first_domain)
     elif MechType.mx.value in mechanism:
         return mx_check(spf_ip, mechanism, argument, first_domain)
@@ -127,16 +128,16 @@ def spf_mech_check(spf_ip, mechanism, argument, first_domain):
 
 
 def ip_check(ip, match):
-    return ip in ipaddress.ip_network(match, strict=False)
+    return ip in ipaddress.ip_network(match, strict=False)  # Defaults to /32 if no cidr-length detected
 
 
 def a_check(ipa, mech, arg, o_domain):
 
     o_domain.dns_lookups += 1  # Functions that require a dns query increments dns count in SPFRecord object
     if MechType.cidr.value in mech:
-        domain_, cidr = arg.split(MechType.cidr.value)
+        domain_, cidr = arg.split(MechType.cidr.value)  # If cidr-length detected, split argument to obtain cidr
         match_list = DNS.dnslookup(domain_, MechType.a.value)
-        for a_ip in match_list:
+        for a_ip in match_list:  # Iterate through a records for match
             if ipa in ipaddress.ip_network(a_ip + MechType.cidr.value + cidr, strict=False):
                 return True
     else:
@@ -150,13 +151,11 @@ def mx_check(ipmx, mech, arg, o_domain):
     o_domain.dns_lookups += 1
     if MechType.cidr.value in mech:
         _, cidr = arg.split(MechType.cidr.value)
-        mx_records = sorted(DNS.dnslookup(arg, MechType.mx.value))
+        mx_records = sorted(DNS.dnslookup(arg, MechType.mx.value))  # Sort mx records based on priority
         mxrr_ip = []
         for priority, mx_rr in mx_records:
             mxrr_ip.append(DNS.dnslookup(mx_rr, MechType.a.value))
-        print(mxrr_ip)
         mx_a = list(itertools.chain.from_iterable(mxrr_ip))
-        print(mx_a)
         for a_ip in mx_a:
             if ipmx in ipaddress.ip_network(a_ip + MechType.cidr.value + cidr, strict=False):
                 return True
@@ -170,7 +169,7 @@ def mx_check(ipmx, mech, arg, o_domain):
 
 def ptr_check(ipp, arg, o_domain):
     o_domain.dns_lookups += 1
-    o_domain.rfc7208 = True
+    o_domain.rfc7208 = True  # Sets rfc7208 value to True if PTR lookup requested (for RFC 7208 violation)
     ip_ptr = DNS.revlookupall(str(ipp))
     for ptr_rr in ip_ptr:
         if arg in ptr_rr:
@@ -182,7 +181,7 @@ def ptr_check(ipp, arg, o_domain):
 
 def exists_check(arg, o_domain):
     o_domain.dns_lookups += 1
-    if DNS.dnslookup(arg, MechType.a.value):
+    if DNS.dnslookup(arg, MechType.a.value):  # If lookup returns record, check passes
         return True
     else:
         return False
@@ -207,7 +206,7 @@ def redirect(redirect_domain):
     return namespace[-1]
 
 
-def spf_fail(flag):   ### Following functions define the mechanism, and flag for SPF decisions.
+def spf_fail(flag):   # Defines the mechanism and flag for SPF decisions
     actions = {
         '+': 'Pass',
         '-': 'Fail',
@@ -217,7 +216,7 @@ def spf_fail(flag):   ### Following functions define the mechanism, and flag for
     return actions[flag[0]]
 
 
-def flag_result(flag, s_ip, dom):
+def flag_result(flag, s_ip, dom):  # Retrieves result/response if no matches prior to last mechanism (eg, ~all)
     flag_mechanisms = {
         '+': 'SPF Policy allows sender with %s ' % flag,
         '-': 'SPF Policy does not authorize %s on behalf of "%s"' % (s_ip, dom),
@@ -241,9 +240,9 @@ def main():
         print('\nPlease enter a valid IP\n')
         check_ip = None
 
-    try:
+    try:  # Detects if domain name or email address is entered for query.
         if re.search('@[\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]i+$', sys.argv[2]):
-            strip = re.search('@([\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]+)$', sys.argv[2])
+            strip = re.search('@([\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]+)$', sys.argv[2])  #Strip user@ if address
             sys.argv[2] = strip.groups()[0]
             check_domain = sys.argv[2]
         elif re.search('^[\-A-Za-z0-9]+\.[A-Za-z]+\.?[A-Za-z]+$', sys.argv[2]):
@@ -251,13 +250,13 @@ def main():
         else:
             raise NameError
     except (IndexError, NameError):
-        print('\nPlease enter a valid domain or email address\n')
+        print('\nPlease enter a valid domain or email address\n')  # If not a valid domain/address, set empty domain.
         check_domain = None
-    except DNS.Base.TimeoutError:
+    except DNS.Base.TimeoutError:  # Temporary DNS error
         print('\nDNS Temp Error')
         sys.exit(0)
 
-    if check_domain and check_ip:
+    if check_domain and check_ip:  # If both valid ip and domain, continue with SPF check
         main_check(check_domain, check_ip)
     else:
         print('Examples\nspfcheck 127.0.0.1 example.com\nspfcheck 127.0.0.1 example@example.com')
@@ -270,7 +269,7 @@ def main_check(domain, ip):
     spf_retrieve(original_domain)
     original_domain.dns_lookups += 1
 
-    if original_domain.spf_flag == MechType.redirect.value:
+    if original_domain.spf_flag == MechType.redirect.value:  # If redirect detected, obtain redirect domain SPF record
         spf_domain = redirect(original_domain)
     else:
         spf_domain = original_domain
