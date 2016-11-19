@@ -242,8 +242,6 @@ def flag_result(flag, s_ip, dom):  # Retrieves result/response if no matches pri
 
 def main():
 
-    sys.argv = ['spf', '64.18.0.2', 'lmiranda.info']
-
     try:
         ip = sys.argv[1]
         check_ip = ipaddress.ip_address(ip)
